@@ -1,0 +1,9 @@
+{
+  "name": "unlayered-ci-tests",
+  "private": true,
+  "type": "module",
+  "description": "Smoke tests for publishing Slicer builds to unlayered3d.com without a real Slicer build.",
+  "dependencies": {
+    "@vercel/blob": "2.8.0"
+  }
+}

@@ -1,0 +1,96 @@
+name: Dummy publish
+
+# Publishes fake installers through scripts/publish-software.mjs so the CI -> site path can be tested
+# in seconds instead of a multi-hour Slicer build. Manual only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      site:
+        description: Site base URL (a test server, see README - never stable against production)
+        required: true
+      channel:
+        description: Which test token to publish with
+        type: choice
+        options: [dev, stable]
+        default: dev
+      base_version:
+        description: Base version (dev builds append -dev+<short sha>)
+        default: 0.0.1
+      size_mb:
+        description: Fake installer size in MB (over 8 uses multipart)
+        default: "12"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dummy-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      UNLAYERED_SITE: ${{ inputs.site }}
+      UNLAYERED_SOFTWARE_PUBLISH_TOKEN: ${{ inputs.channel == 'stable' && secrets.SOFTWARE_PUBLISH_TOKEN_TEST_STABLE || secrets.SOFTWARE_PUBLISH_TOKEN_TEST_DEV }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --no-audit --no-fund
+
+      - name: Refuse stable against production
+        if: inputs.channel == 'stable'
+        run: |
+          case "${UNLAYERED_SITE%/}" in
+            https://unlayered3d.com|https://www.unlayered3d.com)
+              echo "::error::Stable dummy publishes would replace the live download and update. Use a test site."; exit 1 ;;
+          esac
+
+      - name: Version
+        id: v
+        run: |
+          short=$(git rev-parse --short=7 HEAD)
+          if [ "${{ inputs.channel }}" = stable ]; then v="${{ inputs.base_version }}"; else v="${{ inputs.base_version }}-dev+$short"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Publishing as $v"
+
+      - name: Make fake installers
+        run: |
+          mkdir -p out
+          v="${{ steps.v.outputs.version }}"
+          head -c $(( ${{ inputs.size_mb }} * 1024 * 1024 )) /dev/urandom > "out/Unlayered_Slicer_Windows_Installer_V$v.exe"
+          head -c 3145728 /dev/urandom > "out/Unlayered_Slicer_Mac_universal_$v.dmg"
+          head -c 3145728 /dev/urandom > "out/Unlayered_Slicer_Linux_$v.AppImage"
+          printf '## %s\n\n- Dummy build from CI-Tests run %s. Not a real Slicer.\n' "$v" "$GITHUB_RUN_ID" > out/notes.md
+          ls -l out; sha256sum out/*
+
+      - name: Token's channel and what is live
+        run: node scripts/publish-software.mjs list
+
+      - name: Publish
+        run: |
+          v="${{ steps.v.outputs.version }}"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          common=(--version "$v" --commit "$GITHUB_SHA" --build-url "$run_url" --notes-file out/notes.md)
+          node scripts/publish-software.mjs publish --platform windows "${common[@]}" out/*.exe
+          node scripts/publish-software.mjs publish --platform mac     "${common[@]}" out/*.dmg
+          node scripts/publish-software.mjs publish --platform linux   "${common[@]}" out/*.AppImage
+
+      - name: Re-run is a no-op
+        run: |
+          v="${{ steps.v.outputs.version }}"
+          out=$(node scripts/publish-software.mjs publish --platform windows --version "$v" out/*.exe)
+          echo "$out"; echo "$out" | grep -q "already live"
+
+      - name: Bad token is refused
+        env:
+          UNLAYERED_SOFTWARE_PUBLISH_TOKEN: not-a-real-token
+        run: |
+          if node scripts/publish-software.mjs list; then echo "::error::bad token was accepted"; exit 1; fi
+
+      - name: Live after publish
+        run: node scripts/publish-software.mjs list
