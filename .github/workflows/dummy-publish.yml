@@ -65,6 +65,8 @@ jobs:
           head -c $(( ${{ inputs.size_mb }} * 1024 * 1024 )) /dev/urandom > "out/Unlayered_Slicer_Windows_Installer_V$v.exe"
           head -c 3145728 /dev/urandom > "out/Unlayered_Slicer_Mac_universal_$v.dmg"
           head -c 3145728 /dev/urandom > "out/Unlayered_Slicer_Linux_$v.AppImage"
+          head -c 3145728 /dev/urandom > "out/Unlayered_Slicer_Windows_Installer_arm64_V$v.exe"
+          head -c 3145728 /dev/urandom > "out/Unlayered_Slicer_Linux_aarch64_$v.AppImage"
           printf '## %s\n\n- Dummy build from CI-Tests run %s. Not a real Slicer.\n' "$v" "$GITHUB_RUN_ID" > out/notes.md
           ls -l out; sha256sum out/*
 
@@ -76,14 +78,16 @@ jobs:
           v="${{ steps.v.outputs.version }}"
           run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           common=(--version "$v" --commit "$GITHUB_SHA" --branch "$GITHUB_REF_NAME" --build-url "$run_url" --notes-file out/notes.md)
-          node scripts/publish-software.mjs publish --platform windows "${common[@]}" out/*.exe
-          node scripts/publish-software.mjs publish --platform mac     "${common[@]}" out/*.dmg
-          node scripts/publish-software.mjs publish --platform linux   "${common[@]}" out/*.AppImage
+          node scripts/publish-software.mjs publish --platform windows             "${common[@]}" "out/Unlayered_Slicer_Windows_Installer_V$v.exe"
+          node scripts/publish-software.mjs publish --platform windows --arch arm64 "${common[@]}" "out/Unlayered_Slicer_Windows_Installer_arm64_V$v.exe"
+          node scripts/publish-software.mjs publish --platform mac                 "${common[@]}" out/*.dmg
+          node scripts/publish-software.mjs publish --platform linux               "${common[@]}" "out/Unlayered_Slicer_Linux_$v.AppImage"
+          node scripts/publish-software.mjs publish --platform linux --arch arm64   "${common[@]}" "out/Unlayered_Slicer_Linux_aarch64_$v.AppImage"
 
       - name: Re-run is a no-op
         run: |
           v="${{ steps.v.outputs.version }}"
-          out=$(node scripts/publish-software.mjs publish --platform windows --version "$v" out/*.exe)
+          out=$(node scripts/publish-software.mjs publish --platform windows --version "$v" "out/Unlayered_Slicer_Windows_Installer_V$v.exe")
           echo "$out"; echo "$out" | grep -q "already live"
 
       - name: Bad token is refused

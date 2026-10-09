@@ -3,7 +3,7 @@
 // using a software publish token (app/lib/softwarePublishToken.ts). Meant for CI:
 //
 //   node scripts/publish-software.mjs list
-//   node scripts/publish-software.mjs publish --platform <windows|mac|linux> --version <v>
+//   node scripts/publish-software.mjs publish --platform <windows|mac|linux> [--arch <arch>] --version <v>
 //        [--commit <sha>] [--branch <name>] [--build-url <actions run url>] [--notes-file <md>] [--prerelease] <file>
 //
 //   --site <url>   default https://unlayered3d.com (or $UNLAYERED_SITE)
@@ -18,6 +18,10 @@
 //
 // Dev builds are kept (the last 30 versions) and listed on /software/beta by version, with
 // --branch shown beside each, so builds from different branches can be told apart.
+//
+// --arch: windows x64|arm64, mac universal, linux x64|arm64. Left out, the platform's default
+// (windows x64, mac universal, linux x64) -- the build /software, the update check and older
+// scripts mean by the platform alone.
 //
 // A stable publish is also the Slicer's update: /slicer/latest.json is built from the stable record
 // (app/lib/slicerUpdateManifest.ts). The script always sends the file's SHA-256 - without it the
@@ -45,7 +49,7 @@ function die(msg) {
   throw new Fail(msg);
 }
 
-const VALUE_FLAGS = ["--site", "--platform", "--version", "--commit", "--branch", "--build-url", "--notes-file"];
+const VALUE_FLAGS = ["--site", "--platform", "--arch", "--version", "--commit", "--branch", "--build-url", "--notes-file"];
 const BOOLEAN_FLAGS = ["--prerelease"];
 const argv = process.argv.slice(2);
 const opts = {};
@@ -87,6 +91,9 @@ async function api(method, route, body) {
   return json;
 }
 
+// Mirrors SOFTWARE_ARCHS in app/lib/softwareInstallers.ts; the first is each platform's default.
+const ARCHS = { windows: ["x64", "arm64"], mac: ["universal"], linux: ["x64", "arm64"] };
+
 const mb = (n) => `${(n / 1e6).toFixed(2)} MB`;
 const when = (ms) => new Date(ms).toISOString().replace("T", " ").slice(0, 16);
 
@@ -103,13 +110,15 @@ async function list() {
   console.log(`token publishes to: ${channel}`);
   if (installers.length === 0) console.log("(nothing published on this channel)");
   for (const i of installers) {
-    console.log(`${i.platform.padEnd(8)} ${i.version.padEnd(28)} ${mb(i.fileSizeBytes).padStart(10)}  ${when(i.uploadedAt)}  ${i.filename}  [${i.uploadedBy}]`);
+    console.log(`${`${i.platform}/${i.arch}`.padEnd(16)} ${i.version.padEnd(28)} ${mb(i.fileSizeBytes).padStart(10)}  ${when(i.uploadedAt)}  ${i.filename}  [${i.uploadedBy}]`);
   }
 }
 
 async function publish(file) {
   const { platform, version, commit } = opts;
-  if (!["windows", "mac", "linux"].includes(platform)) die("--platform must be windows, mac or linux");
+  if (!ARCHS[platform]) die("--platform must be windows, mac or linux");
+  const arch = opts.arch || ARCHS[platform][0];
+  if (!ARCHS[platform].includes(arch)) die(`--arch for ${platform} must be ${ARCHS[platform].join(" or ")}`);
   if (!version) die("--version is required");
   if (!file) die("publish needs the installer file");
   if (!fs.existsSync(file)) die(`no such file: ${file}`);
@@ -122,13 +131,13 @@ async function publish(file) {
   const releaseNotes = notesFile ? fs.readFileSync(notesFile, "utf8") : undefined;
   const { channel, installers } = await api("GET", "installers");
 
-  const live = installers.find((i) => i.platform === platform);
+  const live = installers.find((i) => i.platform === platform && i.arch === arch);
   if (live && live.version === version && live.filename === filename && live.fileSizeBytes === data.length) {
-    console.log(`already live on ${channel}: ${platform} ${version} (${filename})`);
+    console.log(`already live on ${channel}: ${platform}/${arch} ${version} (${filename})`);
     return;
   }
 
-  console.log(`uploading ${filename} (${mb(data.length)}) to ${channel}/${platform} as ${version} ...`);
+  console.log(`uploading ${filename} (${mb(data.length)}) to ${channel}/${platform}/${arch} as ${version} ...`);
   const blob = await upload(`software-installers/${channel}/${filename}`, data, {
     access: "private",
     handleUploadUrl: `${site}/api/software-publish/upload-token`,
@@ -139,6 +148,7 @@ async function publish(file) {
 
   await api("POST", "installers", {
     platform,
+    arch,
     version,
     filePathname: blob.pathname,
     filename,
@@ -150,7 +160,7 @@ async function publish(file) {
     ...(releaseNotes ? { releaseNotes } : {}),
     ...(opts.prerelease ? { prerelease: true } : {}),
   });
-  console.log(`published ${platform} ${version} to ${channel}${live ? ` (replaced ${live.version})` : ""}`);
+  console.log(`published ${platform}/${arch} ${version} to ${channel}${live ? ` (replaced ${live.version})` : ""}`);
 }
 
 async function main() {
@@ -160,7 +170,7 @@ async function main() {
   } else if (command === "publish") {
     await publish(rest[0]);
   } else {
-    die("usage: list | publish --platform <p> --version <v> [--commit <sha>] [--branch <name>] [--build-url <url>] [--notes-file <md>] [--prerelease] <file>   [--site <url>]");
+    die("usage: list | publish --platform <p> [--arch <a>] --version <v> [--commit <sha>] [--branch <name>] [--build-url <url>] [--notes-file <md>] [--prerelease] <file>   [--site <url>]");
   }
 }
 
