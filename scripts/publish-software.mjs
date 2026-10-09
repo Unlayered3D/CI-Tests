@@ -4,7 +4,7 @@
 //
 //   node scripts/publish-software.mjs list
 //   node scripts/publish-software.mjs publish --platform <windows|mac|linux> --version <v>
-//        [--commit <sha>] [--build-url <actions run url>] [--notes-file <md>] [--prerelease] <file>
+//        [--commit <sha>] [--branch <name>] [--build-url <actions run url>] [--notes-file <md>] [--prerelease] <file>
 //
 //   --site <url>   default https://unlayered3d.com (or $UNLAYERED_SITE)
 //
@@ -15,6 +15,9 @@
 //
 // Publishing the same version, filename and size that is already live is a no-op, so re-running a
 // CI job is safe.
+//
+// Dev builds are kept (the last 30 versions) and listed on /software/beta by version, with
+// --branch shown beside each, so builds from different branches can be told apart.
 //
 // A stable publish is also the Slicer's update: /slicer/latest.json is built from the stable record
 // (app/lib/slicerUpdateManifest.ts). The script always sends the file's SHA-256 - without it the
@@ -42,7 +45,7 @@ function die(msg) {
   throw new Fail(msg);
 }
 
-const VALUE_FLAGS = ["--site", "--platform", "--version", "--commit", "--build-url", "--notes-file"];
+const VALUE_FLAGS = ["--site", "--platform", "--version", "--commit", "--branch", "--build-url", "--notes-file"];
 const BOOLEAN_FLAGS = ["--prerelease"];
 const argv = process.argv.slice(2);
 const opts = {};
@@ -141,6 +144,7 @@ async function publish(file) {
     filename,
     fileSizeBytes: data.length,
     ...(commit ? { commit } : {}),
+    ...(opts.branch ? { branch: opts.branch } : {}),
     ...(opts["build-url"] ? { buildUrl: opts["build-url"] } : {}),
     sha256,
     ...(releaseNotes ? { releaseNotes } : {}),
@@ -156,7 +160,7 @@ async function main() {
   } else if (command === "publish") {
     await publish(rest[0]);
   } else {
-    die("usage: list | publish --platform <p> --version <v> [--commit <sha>] [--build-url <url>] [--notes-file <md>] [--prerelease] <file>   [--site <url>]");
+    die("usage: list | publish --platform <p> --version <v> [--commit <sha>] [--branch <name>] [--build-url <url>] [--notes-file <md>] [--prerelease] <file>   [--site <url>]");
   }
 }
 
